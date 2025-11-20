@@ -11,6 +11,7 @@ import streamlit as st
 import plotly.graph_objects as go
 import google.generativeai as genai
 import os
+import time
 
 warnings.filterwarnings("ignore")
 
@@ -23,27 +24,22 @@ st.set_page_config(
     page_icon="📊"
 )
 
-# Configurar Gemini (compatible con local y cloud)
+# Configurar Gemini
 try:
-    # Intentar cargar desde .env (desarrollo local)
-    try:
-        from dotenv import load_dotenv
-        load_dotenv()
-        GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-    except:
-        # Si falla, usar secrets de Streamlit (cloud)
-        GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
-    
-    if not GEMINI_API_KEY:
-        st.error("❌ No se encontró GEMINI_API_KEY")
-        st.stop()
-    
-    genai.configure(api_key=GEMINI_API_KEY)
-    model = genai.GenerativeModel("gemini-2.0-flash-exp")
-except Exception as e:
-    st.error(f"Error configurando Gemini: {str(e)}")
+    from dotenv import load_dotenv
+    load_dotenv()
+except:
+    pass
+
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or st.secrets.get("GEMINI_API_KEY", "")
+
+if not GEMINI_API_KEY:
+    st.error("❌ No se encontró GEMINI_API_KEY")
     st.stop()
-    
+
+genai.configure(api_key=GEMINI_API_KEY)
+model = genai.GenerativeModel("gemini-2.5-flash")
+
 # =========================
 # ESTILOS CSS
 # =========================
@@ -56,13 +52,6 @@ st.markdown("""
         color: white;
         text-align: center;
         margin-bottom: 2rem;
-    }
-    .metric-card {
-        background: white;
-        padding: 1.5rem;
-        border-radius: 10px;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-        border-left: 4px solid #667eea;
     }
     .stock-card {
         background: #f8f9fa;
@@ -82,38 +71,65 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # =========================
-# FUNCIONES DE SCRAPING
+# FUNCIONES CON RATE LIMITING
 # =========================
 
 @st.cache_data(ttl=3600)
 def scrape_yfinance_data(ticker: str) -> Dict:
-    """Obtiene datos de Yahoo Finance"""
-    try:
-        stock = yf.Ticker(ticker)
-        info = stock.info
-        
-        data = {
-            'nombre': info.get('longName', ticker),
-            'sector': info.get('sector', 'N/D'),
-            'industria': info.get('industry', 'N/D'),
-            'precio_actual': info.get('currentPrice', 0),
-            'market_cap': info.get('marketCap', 0),
-            'pe_ratio': info.get('trailingPE', 0),
-            'dividend_yield': info.get('dividendYield', 0),
-            'beta': info.get('beta', 0),
-            'eps': info.get('trailingEps', 0),
-            'precio_objetivo': info.get('targetMeanPrice', 0)
-        }
-        
-        return data
-    except Exception as e:
-        st.warning(f"Error obteniendo datos de {ticker}: {str(e)}")
-        return {}
+    """Obtiene datos de Yahoo Finance con manejo de rate limiting"""
+    max_retries = 3
+    retry_delay = 2
+    
+    for attempt in range(max_retries):
+        try:
+            # Delay para evitar rate limiting
+            time.sleep(1)
+            
+            stock = yf.Ticker(ticker)
+            info = stock.info
+            
+            # Verificar si obtuvimos datos válidos
+            if not info or 'symbol' not in info:
+                if attempt < max_retries - 1:
+                    time.sleep(retry_delay * (attempt + 1))
+                    continue
+                return {}
+            
+            data = {
+                'nombre': info.get('longName', info.get('shortName', ticker)),
+                'sector': info.get('sector', 'N/D'),
+                'industria': info.get('industry', 'N/D'),
+                'precio_actual': info.get('currentPrice', info.get('regularMarketPrice', 0)),
+                'market_cap': info.get('marketCap', 0),
+                'pe_ratio': info.get('trailingPE', 0),
+                'dividend_yield': info.get('dividendYield', 0),
+                'beta': info.get('beta', 0),
+                'eps': info.get('trailingEps', 0),
+                'precio_objetivo': info.get('targetMeanPrice', 0)
+            }
+            
+            return data
+            
+        except Exception as e:
+            if "Too Many Requests" in str(e) or "429" in str(e):
+                if attempt < max_retries - 1:
+                    wait_time = retry_delay * (attempt + 1)
+                    st.warning(f"⏳ Rate limit alcanzado para {ticker}. Esperando {wait_time}s...")
+                    time.sleep(wait_time)
+                    continue
+            
+            if attempt == max_retries - 1:
+                st.warning(f"⚠️ No se pudieron obtener datos completos de {ticker}")
+                return {}
+    
+    return {}
 
 @st.cache_data(ttl=3600)
 def scrape_finviz_data(ticker: str) -> Dict:
-    """Obtiene datos de Finviz usando web scraping"""
+    """Obtiene datos de Finviz con rate limiting"""
     try:
+        time.sleep(0.5)  # Delay para evitar bloqueos
+        
         url = f"https://finviz.com/quote.ashx?t={ticker}"
         headers = {'User-Agent': 'Mozilla/5.0'}
         response = requests.get(url, headers=headers, timeout=10)
@@ -136,27 +152,40 @@ def scrape_finviz_data(ticker: str) -> Dict:
                         data[key] = value
         
         return data
-    except Exception as e:
-        st.warning(f"Error scraping Finviz para {ticker}: {str(e)}")
+    except Exception:
         return {}
 
 @st.cache_data(ttl=1800)
 def get_historical_prices(ticker: str, period: str = "1y") -> pd.DataFrame:
-    """Obtiene precios históricos"""
-    try:
-        stock = yf.Ticker(ticker)
-        hist = stock.history(period=period)
-        return hist
-    except Exception as e:
-        st.error(f"Error obteniendo histórico de {ticker}: {str(e)}")
-        return pd.DataFrame()
+    """Obtiene precios históricos con rate limiting"""
+    max_retries = 3
+    
+    for attempt in range(max_retries):
+        try:
+            time.sleep(1)
+            stock = yf.Ticker(ticker)
+            hist = stock.history(period=period)
+            
+            if not hist.empty:
+                return hist
+            
+            if attempt < max_retries - 1:
+                time.sleep(2 * (attempt + 1))
+                
+        except Exception as e:
+            if attempt == max_retries - 1:
+                st.warning(f"⚠️ No se pudo obtener histórico de {ticker}")
+                return pd.DataFrame()
+            time.sleep(2 * (attempt + 1))
+    
+    return pd.DataFrame()
 
 # =========================
 # FUNCIONES DE ANÁLISIS
 # =========================
 
 def calculate_metrics(prices: pd.DataFrame) -> Dict:
-    """Calcula métricas financieras del histórico"""
+    """Calcula métricas financieras"""
     if prices.empty:
         return {}
     
@@ -172,13 +201,16 @@ def calculate_metrics(prices: pd.DataFrame) -> Dict:
     
     return metrics
 
-def compare_stocks(tickers: List[str]) -> pd.DataFrame:
-    """Compara múltiples acciones"""
+def compare_stocks(tickers: List[str], progress_bar=None) -> pd.DataFrame:
+    """Compara múltiples acciones con progress bar"""
     comparison_data = []
+    total = len(tickers)
     
-    for ticker in tickers:
+    for idx, ticker in enumerate(tickers):
+        if progress_bar:
+            progress_bar.progress((idx + 1) / total, text=f"Analizando {ticker}...")
+        
         yf_data = scrape_yfinance_data(ticker)
-        finviz_data = scrape_finviz_data(ticker)
         hist = get_historical_prices(ticker, "1y")
         metrics = calculate_metrics(hist)
         
@@ -188,14 +220,16 @@ def compare_stocks(tickers: List[str]) -> pd.DataFrame:
                 'Nombre': yf_data.get('nombre', 'N/D'),
                 'Sector': yf_data.get('sector', 'N/D'),
                 'Precio': f"${yf_data.get('precio_actual', 0):.2f}",
-                'Market Cap': f"${yf_data.get('market_cap', 0)/1e9:.2f}B",
-                'P/E': f"{yf_data.get('pe_ratio', 0):.2f}",
-                'Beta': f"{yf_data.get('beta', 0):.2f}",
-                'Div. Yield': f"{yf_data.get('dividend_yield', 0)*100:.2f}%",
+                'Market Cap': f"${yf_data.get('market_cap', 0)/1e9:.2f}B" if yf_data.get('market_cap', 0) > 0 else "N/D",
+                'P/E': f"{yf_data.get('pe_ratio', 0):.2f}" if yf_data.get('pe_ratio', 0) else "N/D",
+                'Beta': f"{yf_data.get('beta', 0):.2f}" if yf_data.get('beta', 0) else "N/D",
+                'Div. Yield': f"{yf_data.get('dividend_yield', 0)*100:.2f}%" if yf_data.get('dividend_yield', 0) else "0.00%",
                 'Rendimiento 1Y': f"{metrics.get('rendimiento_total', 0):.2f}%",
                 'Volatilidad': f"{metrics.get('volatilidad_anual', 0):.2f}%",
                 'Sharpe': f"{metrics.get('sharpe_ratio', 0):.2f}"
             })
+        else:
+            st.warning(f"⚠️ No se pudieron obtener datos de {ticker}")
     
     return pd.DataFrame(comparison_data)
 
@@ -204,8 +238,7 @@ def compare_stocks(tickers: List[str]) -> pd.DataFrame:
 # =========================
 
 def analyze_with_gemini(portfolio_data: pd.DataFrame, profile: str) -> str:
-    """Análisis con Gemini según perfil de inversión"""
-    
+    """Análisis con Gemini"""
     perfiles = {
         "Conservador": "bajo riesgo, enfocado en preservación de capital y dividendos estables",
         "Moderado": "riesgo medio, balance entre crecimiento y estabilidad",
@@ -225,7 +258,6 @@ def analyze_with_gemini(portfolio_data: pd.DataFrame, profile: str) -> str:
     1. **Evaluación General del Portafolio**
        - Diversificación sectorial
        - Balance riesgo-retorno
-       - Valoración general (P/E ratios)
     
     2. **Recomendaciones Específicas por Acción**
        - Qué acciones mantener, comprar más o vender
@@ -233,13 +265,11 @@ def analyze_with_gemini(portfolio_data: pd.DataFrame, profile: str) -> str:
     
     3. **Estrategia para el Perfil {profile}**
        - Ajustes recomendados
-       - Ponderación sugerida del portafolio
-       - Riesgos a considerar
+       - Ponderación sugerida
     
     4. **Conclusión y Acción Inmediata**
-       - Siguiente paso concreto
     
-    Sé específico, técnico pero claro. Usa las métricas del portafolio.
+    Sé específico y técnico.
     """
     
     try:
@@ -249,7 +279,7 @@ def analyze_with_gemini(portfolio_data: pd.DataFrame, profile: str) -> str:
         return f"Error generando análisis: {str(e)}"
 
 # =========================
-# INTERFAZ PRINCIPAL
+# INTERFAZ
 # =========================
 
 st.markdown("""
@@ -259,19 +289,24 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# Sidebar
 with st.sidebar:
     st.header("⚙️ Configuración")
     
     st.subheader("Selección de Acciones")
     ticker_input = st.text_area(
         "Ingresa los tickers (uno por línea)",
-        value="AAPL\nMSFT\nGOOGL\nAMZN",
-        height=150,
-        help="Ingresa un ticker por línea. Ejemplo: AAPL, MSFT, GOOGL"
+        value="AAPL\nMSFT\nGOOGL",
+        height=120,
+        help="⚠️ Máximo 5 acciones para evitar rate limiting"
     )
     
     tickers = [t.strip().upper() for t in ticker_input.split('\n') if t.strip()]
+    
+    # Limitar a 5 acciones
+    if len(tickers) > 5:
+        st.warning("⚠️ Limitado a 5 acciones para evitar rate limiting")
+        tickers = tickers[:5]
+    
     st.metric("Acciones Seleccionadas", len(tickers))
     
     st.markdown("---")
@@ -283,17 +318,12 @@ with st.sidebar:
         index=1
     )
     
-    st.info(f"**Perfil {perfil}**: " + 
-            ("Bajo riesgo, dividendos" if perfil == "Conservador" else
-             "Riesgo medio, balanceado" if perfil == "Moderado" else
-             "Alto riesgo, crecimiento"))
-    
     st.markdown("---")
     
     st.subheader("📅 Período")
     periodo = st.selectbox(
         "Período histórico",
-        ["1mo", "3mo", "6mo", "1y", "2y", "5y"],
+        ["1mo", "3mo", "6mo", "1y"],
         index=3
     )
     
@@ -306,184 +336,113 @@ if analyze_btn:
         st.error("❌ Por favor ingresa al menos un ticker")
         st.stop()
     
-    with st.spinner("🔄 Analizando portafolio..."):
-        
+    st.info("⏳ Obteniendo datos... Esto puede tomar unos segundos para evitar rate limiting")
+    
+    progress_bar = st.progress(0, text="Iniciando análisis...")
+    
+    try:
         st.header("📊 Comparación de Acciones")
-        comparison_df = compare_stocks(tickers)
+        comparison_df = compare_stocks(tickers, progress_bar)
+        
+        progress_bar.empty()
         
         if not comparison_df.empty:
             st.dataframe(comparison_df, use_container_width=True, hide_index=True)
             
             csv = comparison_df.to_csv(index=False).encode('utf-8')
             st.download_button(
-                "📥 Descargar Comparación (CSV)",
+                "📥 Descargar CSV",
                 csv,
-                f"comparacion_portafolio_{datetime.now().strftime('%Y%m%d')}.csv",
+                f"portafolio_{datetime.now().strftime('%Y%m%d')}.csv",
                 "text/csv"
             )
-        
-        st.markdown("---")
-        
-        st.header("📈 Desempeño Histórico")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            fig_prices = go.Figure()
             
-            for ticker in tickers:
-                hist = get_historical_prices(ticker, periodo)
-                if not hist.empty:
-                    normalized = (hist['Close'] / hist['Close'].iloc[0]) * 100
-                    fig_prices.add_trace(go.Scatter(
-                        x=hist.index,
-                        y=normalized,
-                        name=ticker,
-                        mode='lines'
-                    ))
+            st.markdown("---")
             
-            fig_prices.update_layout(
-                title="Precios Normalizados (Base 100)",
-                xaxis_title="Fecha",
-                yaxis_title="Valor (Base 100)",
-                hovermode='x unified',
-                height=400
-            )
-            st.plotly_chart(fig_prices, use_container_width=True)
-        
-        with col2:
-            volatilidades = []
-            for ticker in tickers:
-                hist = get_historical_prices(ticker, periodo)
-                metrics = calculate_metrics(hist)
-                volatilidades.append({
-                    'Ticker': ticker,
-                    'Volatilidad': metrics.get('volatilidad_anual', 0)
-                })
+            # Gráficos
+            st.header("📈 Desempeño Histórico")
             
-            vol_df = pd.DataFrame(volatilidades)
+            col1, col2 = st.columns(2)
             
-            fig_vol = go.Figure(data=[
-                go.Bar(
-                    x=vol_df['Ticker'],
-                    y=vol_df['Volatilidad'],
-                    marker_color='lightblue',
-                    text=vol_df['Volatilidad'].apply(lambda x: f'{x:.1f}%'),
-                    textposition='outside'
-                )
-            ])
-            
-            fig_vol.update_layout(
-                title="Volatilidad Anual por Acción",
-                xaxis_title="Ticker",
-                yaxis_title="Volatilidad (%)",
-                height=400
-            )
-            st.plotly_chart(fig_vol, use_container_width=True)
-        
-        st.markdown("---")
-        
-        st.header("🔍 Análisis Detallado por Acción")
-        
-        tabs = st.tabs(tickers)
-        
-        for i, ticker in enumerate(tickers):
-            with tabs[i]:
-                col_a, col_b = st.columns([1, 2])
+            with col1:
+                fig_prices = go.Figure()
                 
-                with col_a:
-                    st.subheader(f"{ticker}")
-                    yf_data = scrape_yfinance_data(ticker)
-                    finviz_data = scrape_finviz_data(ticker)
-                    
-                    if yf_data:
-                        st.markdown(f"""
-                        <div class="stock-card">
-                            <h4>{yf_data.get('nombre', 'N/D')}</h4>
-                            <p><strong>Sector:</strong> {yf_data.get('sector', 'N/D')}</p>
-                            <p><strong>Industria:</strong> {yf_data.get('industria', 'N/D')}</p>
-                            <p><strong>Precio:</strong> ${yf_data.get('precio_actual', 0):.2f}</p>
-                            <p><strong>P/E Ratio:</strong> {yf_data.get('pe_ratio', 0):.2f}</p>
-                            <p><strong>Beta:</strong> {yf_data.get('beta', 0):.2f}</p>
-                            <p><strong>Div. Yield:</strong> {yf_data.get('dividend_yield', 0)*100:.2f}%</p>
-                        </div>
-                        """, unsafe_allow_html=True)
-                    
-                    if finviz_data:
-                        st.subheader("Datos Finviz")
-                        with st.expander("Ver datos completos"):
-                            st.json(finviz_data)
-                
-                with col_b:
+                for ticker in tickers:
                     hist = get_historical_prices(ticker, periodo)
                     if not hist.empty:
-                        fig_candle = go.Figure(data=[go.Candlestick(
+                        normalized = (hist['Close'] / hist['Close'].iloc[0]) * 100
+                        fig_prices.add_trace(go.Scatter(
                             x=hist.index,
-                            open=hist['Open'],
-                            high=hist['High'],
-                            low=hist['Low'],
-                            close=hist['Close']
-                        )])
-                        
-                        fig_candle.update_layout(
-                            title=f"{ticker} - Gráfico de Velas",
-                            xaxis_title="Fecha",
-                            yaxis_title="Precio ($)",
-                            height=400,
-                            xaxis_rangeslider_visible=False
-                        )
-                        st.plotly_chart(fig_candle, use_container_width=True)
-                        
-                        metrics = calculate_metrics(hist)
-                        m1, m2, m3, m4 = st.columns(4)
-                        m1.metric("Rendimiento Total", f"{metrics.get('rendimiento_total', 0):.2f}%")
-                        m2.metric("Volatilidad", f"{metrics.get('volatilidad_anual', 0):.2f}%")
-                        m3.metric("Sharpe Ratio", f"{metrics.get('sharpe_ratio', 0):.2f}")
-                        m4.metric("Max Drawdown", f"{metrics.get('max_drawdown', 0):.2f}%")
-        
-        st.markdown("---")
-        
-        st.markdown("""
-        <div class="ai-section">
-            <h2>🤖 Análisis con Inteligencia Artificial</h2>
-            <p>Análisis personalizado según tu perfil de inversión</p>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        with st.spinner("🧠 Generando análisis con Gemini..."):
-            ai_analysis = analyze_with_gemini(comparison_df, perfil)
-            st.markdown(ai_analysis)
-        
-        st.success("✅ Análisis completado")
+                            y=normalized,
+                            name=ticker,
+                            mode='lines'
+                        ))
+                
+                fig_prices.update_layout(
+                    title="Precios Normalizados (Base 100)",
+                    xaxis_title="Fecha",
+                    yaxis_title="Valor",
+                    hovermode='x unified',
+                    height=400
+                )
+                st.plotly_chart(fig_prices, use_container_width=True)
+            
+            with col2:
+                volatilidades = []
+                for ticker in tickers:
+                    hist = get_historical_prices(ticker, periodo)
+                    metrics = calculate_metrics(hist)
+                    volatilidades.append({
+                        'Ticker': ticker,
+                        'Volatilidad': metrics.get('volatilidad_anual', 0)
+                    })
+                
+                vol_df = pd.DataFrame(volatilidades)
+                
+                fig_vol = go.Figure(data=[
+                    go.Bar(
+                        x=vol_df['Ticker'],
+                        y=vol_df['Volatilidad'],
+                        marker_color='lightblue',
+                        text=vol_df['Volatilidad'].apply(lambda x: f'{x:.1f}%'),
+                        textposition='outside'
+                    )
+                ])
+                
+                fig_vol.update_layout(
+                    title="Volatilidad Anual",
+                    xaxis_title="Ticker",
+                    yaxis_title="Volatilidad (%)",
+                    height=400
+                )
+                st.plotly_chart(fig_vol, use_container_width=True)
+            
+            st.markdown("---")
+            
+            # Análisis IA
+            st.markdown("""
+            <div class="ai-section">
+                <h2>🤖 Análisis con IA</h2>
+                <p>Análisis personalizado según tu perfil</p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            with st.spinner("🧠 Generando análisis..."):
+                ai_analysis = analyze_with_gemini(comparison_df, perfil)
+                st.markdown(ai_analysis)
+            
+            st.success("✅ Análisis completado")
+        else:
+            st.error("❌ No se pudieron obtener datos. Intenta de nuevo en unos minutos.")
+    
+    except Exception as e:
+        progress_bar.empty()
+        st.error(f"❌ Error: {str(e)}")
 
 else:
-    st.info("👈 Configura tu portafolio en la barra lateral y presiona **ANALIZAR PORTAFOLIO**")
+    st.info("👈 Configura tu portafolio y presiona ANALIZAR")
     
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        st.markdown("""
-        ### 📊 Análisis Completo
-        - Datos de Yahoo Finance
-        - Scraping de Finviz
-        - Métricas financieras avanzadas
-        """)
-    
-    with col2:
-        st.markdown("""
-        ### 📈 Comparación Visual
-        - Gráficos interactivos
-        - Análisis de volatilidad
-        - Desempeño histórico
-        """)
-    
-    with col3:
-        st.markdown("""
-        ### 🤖 IA Personalizada
-        - Análisis con Gemini
-        - Recomendaciones por perfil
-        - Estrategias de inversión
-        """)
+    st.warning("⚠️ **Importante**: Limita el análisis a 5 acciones máximo para evitar rate limiting de Yahoo Finance")
 
 st.markdown("---")
-st.caption("📊 Análisis de Portafolio | Datos de Yahoo Finance & Finviz | Powered by Gemini AI")
+st.caption("📊 Análisis de Portafolio | Yahoo Finance & Finviz | Gemini AI")
