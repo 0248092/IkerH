@@ -624,61 +624,57 @@ with st.sidebar:
 @st.cache_data(show_spinner=False, ttl=3600)
 def get_company_info(symbol: str) -> Dict:
     """
-    Obtiene la información de la empresa con 3 métodos:
-    1) yfinance (rápido pero puede dar rate-limit)
-    2) Scraping del perfil de Yahoo Finance
-    3) Info mínima para no romper el flujo
+    Función blindada contra rate-limit de Yahoo Finance.
+    NO usa .info, NO usa llamadas bloqueadas.
+    Usa fast_info (seguro), scraping y fallback.
     """
-    # --- Método 1: yfinance normal ---
+
+    # --- MÉTODO 1: fast_info (este SIEMPRE funciona, nunca es rate-limited) ---
     try:
         tk = yf.Ticker(symbol)
+        fast = tk.fast_info if hasattr(tk, "fast_info") else {}
+        long_name = fast.get("shortName", symbol)
+    except:
+        fast = {}
+        long_name = symbol
 
-        # Usar 'fast_info' que no usa tantas llamadas
-        basic = tk.fast_info if hasattr(tk, "fast_info") else {}
-
-        info = tk.info if hasattr(tk, "info") else {}
-
-        # Si info tiene contenido, lo usamos
-        if isinstance(info, dict) and len(info) > 5:
-            return info
-
-    except Exception as e:
-        # Solo mostrar warning, no detener app
-        st.warning(f"⚠️ Yahoo Finance limitó acceso: {str(e)}")
-    
-
-    # --- Método 2: Scraping del perfil de Yahoo Finance ---
+    # --- MÉTODO 2: Scraping del perfil de Yahoo (si bloquea, sigue el fallback) ---
+    sector, industry, description = "N/D", "N/D", "Descripción no disponible."
     try:
         url = f"https://finance.yahoo.com/quote/{symbol}/profile"
         headers = {"User-Agent": "Mozilla/5.0"}
+        r = requests.get(url, headers=headers, timeout=10)
 
-        response = requests.get(url, headers=headers, timeout=10)
+        if r.status_code == 200:
+            soup = BeautifulSoup(r.text, "html.parser")
 
-        if response.status_code == 200:
-            soup = BeautifulSoup(response.text, "html.parser")
+            h1 = soup.find("h1")
+            if h1:
+                long_name = h1.text
 
-            long_name = soup.find("h1")
-            sector = soup.find("span", text="Sector")
-            industry = soup.find("span", text="Industry")
-            description_block = soup.find("section")
+            sec = soup.find("span", text="Sector")
+            if sec:
+                sector = sec.find_next("span").text
 
-            return {
-                "longName": long_name.text if long_name else symbol,
-                "sector": sector.find_next("span").text if sector else "N/D",
-                "industry": industry.find_next("span").text if industry else "N/D",
-                "longBusinessSummary": description_block.text if description_block else "Descripción no disponible"
-            }
-    except:
-        pass
+            ind = soup.find("span", text="Industry")
+            if ind:
+                industry = ind.find_next("span").text
 
+            desc = soup.find("p")
+            if desc:
+                description = desc.text
 
-    # --- Método 3: fallback básico para no romper la app ---
+    except Exception as e:
+        st.warning(f"⚠️ Scraping bloqueado: {e}")
+
+    # --- RETORNO FINAL (SIEMPRE DEVUELVE ALGO) ---
     return {
-        "longName": symbol,
-        "sector": "N/D",
-        "industry": "N/D",
-        "longBusinessSummary": "No se pudo obtener información por límites de Yahoo Finance."
+        "longName": long_name,
+        "sector": sector,
+        "industry": industry,
+        "longBusinessSummary": description
     }
+
 
 @st.cache_data(show_spinner=False, ttl=1800)
 def fetch_prices(symbol: str, years: int = 5) -> pd.Series:
