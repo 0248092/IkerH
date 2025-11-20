@@ -287,6 +287,8 @@ def analyze_with_gemini(portfolio_data: pd.DataFrame, profile: str) -> str:
     2. Recomendaciones por acción
     3. Estrategia para perfil {profile}
     4. Conclusión
+
+    Haz el analisis financiero con máximo 300 palabras inlcuyendo bullet points de un analisis con ponderaciones del portafolio por acción y alternativas de inversión contra sus peers, todo con finalidad de maximizar rendimientos con el menor riesgo posible.
     """
     
     try:
