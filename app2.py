@@ -1,8 +1,4 @@
-# app_dashboard_financiero_ai_pro.py
-# Dashboard Financiero con IA - Optimizado para Rúbrica de Ingeniería Financiera
-# Ejecuta: python -m streamlit run app_dashboard_financiero_ai_pro.py
-# Autor: Iker Huerga
-# Version: 5.0 PRO
+
 
 from __future__ import annotations
 import warnings
@@ -19,6 +15,8 @@ import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import google.generativeai as genai
+from dotenv import load_dotenv
+import os
 
 warnings.filterwarnings("ignore")
 
@@ -29,8 +27,8 @@ APP_OWNER = "Iker Huerga"
 APP_VERSION = "5.0.0 PRO"
 DISCLAIMER = f"© {date.today().year} {APP_OWNER} — Uso académico. No es asesoría financiera."
 
-# Gemini 2.0 Flash Experimental
-API_KEY = "AIzaSyBZV3L260p3mDLbKHrgkcWfCf6nawpDVV4"
+load_dotenv()
+API_KEY = os.getenv("GEMINI_API_KEY")
 genai.configure(api_key=API_KEY)
 model = genai.GenerativeModel("gemini-2.0-flash-exp")
 
@@ -1747,5 +1745,4 @@ else:
     <div class="footer">
         <strong>{DISCLAIMER}</strong><br>
         <small>Desarrollado con Streamlit · Datos de Yahoo Finance · IA con Google Gemini</small>
-    </div>
-    """, unsafe_allow_html=True)
+    </div>""")

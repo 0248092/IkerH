@@ -6,6 +6,3 @@ plotly
 requests
 beautifulsoup4
 google-generativeai
-
-
-
