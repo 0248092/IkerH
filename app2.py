@@ -919,7 +919,7 @@ if generate_btn:
         st.markdown("""
         <div class="ai-section">
             <h2>🤖 Análisis Final con IA</h2>
-            <p>Evaluación concisa del portafolio generado (máx. 300 palabras)</p>
+            <p>Evaluación concisa del portafolio generado</p>
         </div>
         """, unsafe_allow_html=True)
         
