@@ -243,7 +243,7 @@ def generate_portfolio_with_gemini(perfil: str, horizonte: str, capital: str, ob
     
     **IMPORTANTE:** 
     - Los pesos deben sumar exactamente 100
-    - Solo tickers válidos de NYSE/NASDAQ
+    - Solo tickers válidos de NYSE/NASDAQ/BMV
     - Incluye 5-10 posiciones
     - NO incluyas texto adicional, solo el JSON
     """
@@ -320,7 +320,7 @@ def analyze_portfolio_with_gemini(portfolio_data: pd.DataFrame, metrics: Dict, p
        - Acción inmediata recomendada
        - Monitoreo sugerido
     
-    Sé específico, técnico pero claro.
+    Sé específico, técnico pero claro. Por ningpun motivo te excedas de 300 palabras.
     """
     
     try:
