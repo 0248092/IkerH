@@ -561,7 +561,7 @@ def analyze_portfolio_with_gemini(portfolio_data: pd.DataFrame, metrics: Dict, p
     3. Gestión riesgo (70 palabras)
     4. Recomendaciones (100 palabras)
     
-    Sé directo y específico.
+    Sé directo y específico. IMPORTANTE: NO pongas cuantas palabras pusiste.
     """
     
     try:
