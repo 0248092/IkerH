@@ -43,7 +43,7 @@ try:
 except Exception as e:
     st.error(f"Error configurando Gemini: {str(e)}")
     st.stop()
-
+    
 # =========================
 # ESTILOS CSS
 # =========================
