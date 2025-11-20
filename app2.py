@@ -40,15 +40,29 @@ genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel("gemini-2.5-flash")
 
 # Inicializar session state
+if 'portfolio_generated' not in st.session_state:
+    st.session_state.portfolio_generated = False
 if 'selected_stock_ticker' not in st.session_state:
     st.session_state.selected_stock_ticker = None
 if 'portfolio_details' not in st.session_state:
     st.session_state.portfolio_details = None
 if 'batch_data' not in st.session_state:
     st.session_state.batch_data = None
+if 'portafolio' not in st.session_state:
+    st.session_state.portafolio = None
+if 'justificacion' not in st.session_state:
+    st.session_state.justificacion = None
+if 'successful_tickers' not in st.session_state:
+    st.session_state.successful_tickers = None
+if 'adjusted_weights' not in st.session_state:
+    st.session_state.adjusted_weights = None
+if 'portfolio_metrics' not in st.session_state:
+    st.session_state.portfolio_metrics = None
+if 'individual_df' not in st.session_state:
+    st.session_state.individual_df = None
 
 # =========================
-# ESTILOS CSS MEJORADOS
+# ESTILOS CSS
 # =========================
 st.markdown("""
 <style>
@@ -212,23 +226,6 @@ st.markdown("""
         font-size: 1.2rem;
         opacity: 0.9;
         margin-top: 0.5rem;
-    }
-    
-    .close-button {
-        background: #f44336;
-        color: white;
-        border: none;
-        padding: 0.75rem 2rem;
-        border-radius: 10px;
-        font-weight: 700;
-        cursor: pointer;
-        font-size: 1rem;
-        transition: all 0.3s ease;
-    }
-    
-    .close-button:hover {
-        background: #d32f2f;
-        transform: scale(1.05);
     }
     
     .enhanced-table {
@@ -447,7 +444,7 @@ def calculate_portfolio_metrics(batch_data: Dict, weights: Dict) -> Dict:
 # =========================
 
 def generate_portfolio_with_gemini(perfil: str, horizonte: str, capital: str, objetivos: List[str], sector_pref: str, bolsas: List[str]) -> Tuple[List[Dict], str]:
-    """Genera portafolio con Gemini"""
+    """Genera portafolio con Gemini - JUSTIFICACIÓN MÁXIMO 150 PALABRAS"""
     objetivos_str = ", ".join(objetivos)
     bolsas_str = ", ".join(bolsas)
     
@@ -467,6 +464,7 @@ def generate_portfolio_with_gemini(perfil: str, horizonte: str, capital: str, ob
     2. NYSE/NASDAQ: sin sufijo (AAPL, MSFT)
     3. BMV: sufijo .MX (WALMEX.MX)
     4. Diversifica
+    5. Justificación: MÁXIMO 150 palabras, concisa y directa, sin mencionar el límite de palabras
     
     **Responde SOLO JSON:**
 ```json
@@ -475,9 +473,11 @@ def generate_portfolio_with_gemini(perfil: str, horizonte: str, capital: str, ob
             {{"ticker": "AAPL", "peso": 15, "razon": "Líder tecnológico"}},
             ...
         ],
-        "justificacion": "..."
+        "justificacion": "Este portafolio combina..."
     }}
 ```
+    
+    IMPORTANTE: Justificación de máximo 150 palabras sin mencionar cuántas palabras tiene.
     """
     
     try:
@@ -498,24 +498,39 @@ def generate_portfolio_with_gemini(perfil: str, horizonte: str, capital: str, ob
         return [], ""
 
 def analyze_portfolio_with_gemini(portfolio_data: pd.DataFrame, metrics: Dict, perfil: str, justificacion_inicial: str) -> str:
-    """Análisis final - MÁXIMO 300 PALABRAS"""
+    """Análisis final - MÁXIMO 300 PALABRAS SIN MENCIONAR EL LÍMITE"""
     prompt = f"""
-    Análisis CONCISO (MÁXIMO 300 PALABRAS).
+    Como asesor financiero, proporciona un análisis profesional y conciso del portafolio.
     
-    **Portafolio:** {justificacion_inicial}
+    **Contexto Inicial:** {justificacion_inicial}
     **Datos:** {portfolio_data.to_string()}
     **Métricas:**
-    - Rendimiento: {metrics.get('rendimiento_total', 0):.2f}%
+    - Rendimiento Total: {metrics.get('rendimiento_total', 0):.2f}%
     - Volatilidad: {metrics.get('volatilidad_anual', 0):.2f}%
     - Sharpe: {metrics.get('sharpe_ratio', 0):.2f}
+    - Max DD: {metrics.get('max_drawdown', 0):.2f}%
     
     **Perfil:** {perfil}
     
-    Incluye (300 palabras MAX):
-    1. Evaluación (50 palabras)
-    2. Top posiciones (80 palabras)
-    3. Riesgo (70 palabras)
-    4. Recomendaciones (100 palabras)
+    Estructura tu análisis en 4 secciones breves:
+    
+    1. **Evaluación General del Desempeño**
+       - Análisis del Sharpe Ratio y rendimiento ajustado por riesgo
+       - Alineación con el perfil de riesgo
+    
+    2. **Análisis de Posiciones Clave**
+       - Identifica las 2 mejores y 2 peores posiciones
+       - Evalúa si las ponderaciones son apropiadas
+    
+    3. **Gestión de Riesgo**
+       - Evalúa el Max Drawdown y volatilidad
+       - Comenta sobre la diversificación sectorial
+    
+    4. **Recomendaciones Accionables**
+       - Acciones específicas: mantener/aumentar/reducir posiciones
+       - Próximos pasos para el inversionista
+    
+    Sé directo, específico y profesional. NO menciones límites de palabras ni cuántas palabras tiene tu respuesta.
     """
     
     try:
@@ -525,11 +540,11 @@ def analyze_portfolio_with_gemini(portfolio_data: pd.DataFrame, metrics: Dict, p
         return f"Error: {str(e)}"
 
 # =========================
-# FUNCIÓN PARA RENDERIZAR DETALLE DE ACCIÓN (POP-UP)
+# FUNCIÓN PARA RENDERIZAR DETALLE DE ACCIÓN
 # =========================
 
 def render_stock_detail_popup(ticker: str, details: Dict, batch_data: Dict):
-    """Renderiza el detalle completo de la acción seleccionada como pop-up"""
+    """Renderiza el detalle completo de la acción seleccionada"""
     
     st.markdown(f"""
     <div class="stock-detail-popup">
@@ -541,13 +556,13 @@ def render_stock_detail_popup(ticker: str, details: Dict, batch_data: Dict):
     """, unsafe_allow_html=True)
     
     # Botón para cerrar
-    if st.button("✖️ Cerrar Detalle", key="close_detail_btn", type="secondary"):
+    if st.button("✖️ Cerrar Detalle", key="close_detail_btn"):
         st.session_state.selected_stock_ticker = None
         st.rerun()
     
     st.markdown("---")
     
-    # Información básica en 4 columnas
+    # Información básica
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
@@ -598,11 +613,11 @@ def render_stock_detail_popup(ticker: str, details: Dict, batch_data: Dict):
         </div>
         """, unsafe_allow_html=True)
     
-    # Razón de inclusión
+    # Razón
     razon_info = next((item['razon'] for item in st.session_state.portfolio_details if item['ticker'] == ticker), "")
     st.markdown(f"""
     <div class="info-card">
-        <strong>💡 Razón de inclusión en el portafolio:</strong><br>{razon_info}
+        <strong>💡 Razón de inclusión:</strong><br>{razon_info}
     </div>
     """, unsafe_allow_html=True)
     
@@ -616,7 +631,7 @@ def render_stock_detail_popup(ticker: str, details: Dict, batch_data: Dict):
     st.markdown("---")
     
     # KPIs en tabs
-    tab1, tab2, tab3 = st.tabs(["📊 Métricas de Valuación", "💼 Métricas Operativas", "📈 Análisis Técnico"])
+    tab1, tab2, tab3 = st.tabs(["📊 Valuación", "💼 Operativas", "📈 Técnico"])
     
     with tab1:
         col1, col2, col3, col4 = st.columns(4)
@@ -628,7 +643,6 @@ def render_stock_detail_popup(ticker: str, details: Dict, batch_data: Dict):
             <div class="metric-box">
                 <div class="metric-label">P/E Ratio</div>
                 <div class="metric-value" style="color: {pe_color}">{pe:.2f if pe else 'N/D'}</div>
-                <div class="metric-sublabel">Precio/Ganancias</div>
             </div>
             """, unsafe_allow_html=True)
         
@@ -638,7 +652,6 @@ def render_stock_detail_popup(ticker: str, details: Dict, batch_data: Dict):
             <div class="metric-box">
                 <div class="metric-label">P/B Ratio</div>
                 <div class="metric-value">{pb:.2f if pb else 'N/D'}</div>
-                <div class="metric-sublabel">Precio/Valor Libro</div>
             </div>
             """, unsafe_allow_html=True)
         
@@ -648,18 +661,15 @@ def render_stock_detail_popup(ticker: str, details: Dict, batch_data: Dict):
             <div class="metric-box">
                 <div class="metric-label">Dividend Yield</div>
                 <div class="metric-value" style="color: #4CAF50">{div_yield:.2f}%</div>
-                <div class="metric-sublabel">Rendimiento dividendos</div>
             </div>
             """, unsafe_allow_html=True)
         
         with col4:
             beta = details.get('beta', 0)
-            beta_color = "#4CAF50" if beta < 1 else "#FF9800" if beta < 1.5 else "#f44336"
             st.markdown(f"""
             <div class="metric-box">
                 <div class="metric-label">Beta</div>
-                <div class="metric-value" style="color: {beta_color}">{beta:.2f if beta else 'N/D'}</div>
-                <div class="metric-sublabel">Volatilidad vs mercado</div>
+                <div class="metric-value">{beta:.2f if beta else 'N/D'}</div>
             </div>
             """, unsafe_allow_html=True)
     
@@ -668,23 +678,19 @@ def render_stock_detail_popup(ticker: str, details: Dict, batch_data: Dict):
         
         with col1:
             profit_margin = details.get('profit_margin', 0) * 100 if details.get('profit_margin') else 0
-            pm_color = "#4CAF50" if profit_margin > 20 else "#FF9800" if profit_margin > 10 else "#f44336"
             st.markdown(f"""
             <div class="metric-box">
-                <div class="metric-label">Margen de Utilidad</div>
-                <div class="metric-value" style="color: {pm_color}">{profit_margin:.1f}%</div>
-                <div class="metric-sublabel">Profit Margin</div>
+                <div class="metric-label">Margen Utilidad</div>
+                <div class="metric-value" style="color: {'#4CAF50' if profit_margin > 20 else '#FF9800'}">{profit_margin:.1f}%</div>
             </div>
             """, unsafe_allow_html=True)
         
         with col2:
             roe = details.get('roe', 0) * 100 if details.get('roe') else 0
-            roe_color = "#4CAF50" if roe > 15 else "#FF9800" if roe > 10 else "#f44336"
             st.markdown(f"""
             <div class="metric-box">
                 <div class="metric-label">ROE</div>
-                <div class="metric-value" style="color: {roe_color}">{roe:.1f}%</div>
-                <div class="metric-sublabel">Return on Equity</div>
+                <div class="metric-value" style="color: {'#4CAF50' if roe > 15 else '#FF9800'}">{roe:.1f}%</div>
             </div>
             """, unsafe_allow_html=True)
         
@@ -692,27 +698,10 @@ def render_stock_detail_popup(ticker: str, details: Dict, batch_data: Dict):
             rev_growth = details.get('revenue_growth', 0) * 100 if details.get('revenue_growth') else 0
             st.markdown(f"""
             <div class="metric-box">
-                <div class="metric-label">Crecimiento Ingresos</div>
+                <div class="metric-label">Crecimiento</div>
                 <div class="metric-value" style="color: {'#4CAF50' if rev_growth > 0 else '#f44336'}">{rev_growth:+.1f}%</div>
-                <div class="metric-sublabel">Revenue Growth YoY</div>
             </div>
             """, unsafe_allow_html=True)
-        
-        st.markdown("<br>", unsafe_allow_html=True)
-        
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            op_margin = details.get('operating_margin', 0) * 100 if details.get('operating_margin') else 0
-            st.metric("Margen Operativo", f"{op_margin:.1f}%")
-        
-        with col2:
-            roa = details.get('roa', 0) * 100 if details.get('roa') else 0
-            st.metric("ROA", f"{roa:.1f}%")
-        
-        with col3:
-            de_ratio = details.get('debt_to_equity', 0)
-            st.metric("Deuda/Capital", f"{de_ratio:.2f}" if de_ratio else "N/D")
     
     with tab3:
         if ticker in batch_data and batch_data[ticker]['success']:
@@ -728,58 +717,36 @@ def render_stock_detail_popup(ticker: str, details: Dict, batch_data: Dict):
                 high=hist['High'],
                 low=hist['Low'],
                 close=hist['Close'],
-                name='Precio',
-                increasing_line_color='#4CAF50',
-                decreasing_line_color='#f44336'
+                name='Precio'
             ))
             
-            # Medias móviles
             sma_20 = hist['Close'].rolling(window=20).mean()
             sma_50 = hist['Close'].rolling(window=50).mean()
             
-            fig_candle.add_trace(go.Scatter(
-                x=hist.index,
-                y=sma_20,
-                name='SMA 20',
-                line=dict(color='#FF9800', width=2)
-            ))
-            
-            fig_candle.add_trace(go.Scatter(
-                x=hist.index,
-                y=sma_50,
-                name='SMA 50',
-                line=dict(color='#2196F3', width=2)
-            ))
+            fig_candle.add_trace(go.Scatter(x=hist.index, y=sma_20, name='SMA 20', line=dict(color='#FF9800', width=2)))
+            fig_candle.add_trace(go.Scatter(x=hist.index, y=sma_50, name='SMA 50', line=dict(color='#2196F3', width=2)))
             
             fig_candle.update_layout(
                 title=f'Gráfico de Velas - {ticker}',
                 yaxis_title='Precio ($)',
                 xaxis_rangeslider_visible=False,
-                height=450,
-                template='plotly_white',
-                font=dict(family='Inter')
+                height=400,
+                template='plotly_white'
             )
             
             st.plotly_chart(fig_candle, use_container_width=True)
             
-            # Métricas técnicas
+            # Métricas
             col1, col2, col3, col4 = st.columns(4)
             
             with col1:
-                rend = metrics.get('rendimiento_total', 0)
-                st.metric("Rendimiento 1Y", f"{rend:+.2f}%", delta=None)
-            
+                st.metric("Rendimiento 1Y", f"{metrics.get('rendimiento_total', 0):+.2f}%")
             with col2:
-                vol = metrics.get('volatilidad_anual', 0)
-                st.metric("Volatilidad Anual", f"{vol:.1f}%")
-            
+                st.metric("Volatilidad", f"{metrics.get('volatilidad_anual', 0):.1f}%")
             with col3:
-                sharpe = metrics.get('sharpe_ratio', 0)
-                st.metric("Sharpe Ratio", f"{sharpe:.2f}")
-            
+                st.metric("Sharpe", f"{metrics.get('sharpe_ratio', 0):.2f}")
             with col4:
-                dd = metrics.get('max_drawdown', 0)
-                st.metric("Max Drawdown", f"{dd:.1f}%")
+                st.metric("Max DD", f"{metrics.get('max_drawdown', 0):.1f}%")
 
 # =========================
 # INTERFAZ PRINCIPAL
@@ -792,83 +759,162 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# CUESTIONARIO
-st.markdown('<div class="questionnaire-card">', unsafe_allow_html=True)
-st.header("📋 Cuestionario de Perfil de Inversión")
+# CUESTIONARIO (siempre visible si no hay portafolio generado)
+if not st.session_state.portfolio_generated:
+    st.markdown('<div class="questionnaire-card">', unsafe_allow_html=True)
+    st.header("📋 Cuestionario de Perfil de Inversión")
 
-col1, col2 = st.columns(2)
+    col1, col2 = st.columns(2)
 
-with col1:
-    perfil = st.selectbox("🎯 Perfil de riesgo", ["Conservador", "Moderado", "Agresivo"])
-    horizonte = st.selectbox("⏰ Horizonte", ["Corto plazo (< 1 año)", "Mediano plazo (1-5 años)", "Largo plazo (> 5 años)"], index=1)
-    capital = st.selectbox("💰 Capital", ["< $10,000", "$10,000 - $50,000", "$50,000 - $100,000", "> $100,000"], index=1)
+    with col1:
+        perfil = st.selectbox("🎯 Perfil de riesgo", ["Conservador", "Moderado", "Agresivo"])
+        horizonte = st.selectbox("⏰ Horizonte", ["Corto plazo (< 1 año)", "Mediano plazo (1-5 años)", "Largo plazo (> 5 años)"], index=1)
+        capital = st.selectbox("💰 Capital", ["< $10,000", "$10,000 - $50,000", "$50,000 - $100,000", "> $100,000"], index=1)
 
-with col2:
-    objetivos = st.multiselect(
-        "🎯 Objetivos",
-        ["Crecimiento de capital", "Generación de ingresos (dividendos)", "Preservación de capital", "Diversificación internacional", "Inversión ESG/Sostenible"],
-        default=["Crecimiento de capital"]
-    )
-    sector_pref = st.selectbox("🏢 Sector", ["Sin preferencia (diversificado)", "Tecnología", "Salud", "Finanzas", "Energía", "Consumo"], index=0)
-    bolsas_preferidas = st.multiselect("🌍 Bolsas", list(BOLSAS_SUFIJOS.keys()), default=["NYSE/NASDAQ (USA)"])
+    with col2:
+        objetivos = st.multiselect(
+            "🎯 Objetivos",
+            ["Crecimiento de capital", "Generación de ingresos (dividendos)", "Preservación de capital", "Diversificación internacional", "Inversión ESG/Sostenible"],
+            default=["Crecimiento de capital"]
+        )
+        sector_pref = st.selectbox("🏢 Sector", ["Sin preferencia (diversificado)", "Tecnología", "Salud", "Finanzas", "Energía", "Consumo"], index=0)
+        bolsas_preferidas = st.multiselect("🌍 Bolsas", list(BOLSAS_SUFIJOS.keys()), default=["NYSE/NASDAQ (USA)"])
 
-st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
 
-generate_btn = st.button("🚀 GENERAR PORTAFOLIO", type="primary", use_container_width=True)
+    generate_btn = st.button("🚀 GENERAR PORTAFOLIO", type="primary", use_container_width=True)
 
-# GENERACIÓN
-if generate_btn:
+    if generate_btn:
+        if not objetivos or not bolsas_preferidas:
+            st.error("❌ Completa todos los campos")
+            st.stop()
+        
+        with st.spinner("🧠 Generando portafolio..."):
+            portafolio, justificacion = generate_portfolio_with_gemini(perfil, horizonte, capital, objetivos, sector_pref, bolsas_preferidas)
+        
+        if not portafolio:
+            st.error("❌ Error generando portafolio")
+            st.stop()
+        
+        # Guardar en session state
+        st.session_state.portafolio = portafolio
+        st.session_state.justificacion = justificacion
+        
+        # Obtener detalles
+        with st.spinner("📥 Obteniendo detalles..."):
+            portfolio_details = []
+            for item in portafolio:
+                details = get_company_details(item['ticker'])
+                portfolio_details.append({**item, **details})
+            st.session_state.portfolio_details = portfolio_details
+            time.sleep(1)
+        
+        # Obtener datos históricos
+        tickers = [p['ticker'] for p in portafolio]
+        with st.spinner("📈 Descargando datos..."):
+            batch_data = get_batch_stock_data(tickers, "1y")
+            st.session_state.batch_data = batch_data
+            time.sleep(1)
+        
+        # Calcular métricas
+        successful_tickers = [t for t in tickers if t in batch_data and batch_data[t]['success']]
+        weights = {p['ticker']: p['peso'] / 100 for p in portafolio}
+        total_successful_weight = sum([weights[t] for t in successful_tickers])
+        adjusted_weights = {t: weights[t] / total_successful_weight for t in successful_tickers}
+        
+        st.session_state.successful_tickers = successful_tickers
+        st.session_state.adjusted_weights = adjusted_weights
+        
+        # Calcular métricas individuales
+        individual_data = []
+        for ticker in successful_tickers:
+            hist = batch_data[ticker]['history']
+            metrics = calculate_metrics(hist)
+            
+            individual_data.append({
+                'Ticker': ticker,
+                'Peso': f"{adjusted_weights[ticker]*100:.1f}%",
+                'Precio': f"${batch_data[ticker]['current_price']:.2f}",
+                'Rendimiento': f"{'🟢' if metrics.get('rendimiento_total', 0) > 0 else '🔴'} {metrics.get('rendimiento_total', 0):.2f}%",
+                'Volatilidad': f"{metrics.get('volatilidad_anual', 0):.1f}%",
+                'Sharpe': f"{metrics.get('sharpe_ratio', 0):.2f}",
+                'Max DD': f"{metrics.get('max_drawdown', 0):.1f}%"
+            })
+        
+        st.session_state.individual_df = pd.DataFrame(individual_data)
+        
+        # Calcular métricas del portafolio
+        portfolio_metrics = calculate_portfolio_metrics(batch_data, adjusted_weights)
+        st.session_state.portfolio_metrics = portfolio_metrics
+        
+        # Marcar como generado
+        st.session_state.portfolio_generated = True
+        st.rerun()
+
+    else:
+        st.info("👆 Completa el cuestionario y presiona el botón")
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.markdown("""
+            ### 🤖 IA Personalizada
+            - Gemini 2.5 Flash
+            - Portafolio óptimo
+            - 5-10 posiciones
+            - Multi-bolsa
+            """)
+        
+        with col2:
+            st.markdown("""
+            ### 📊 Análisis Completo
+            - Métricas avanzadas
+            - Visualizaciones
+            - Dashboard por acción
+            - KPIs detallados
+            """)
+        
+        with col3:
+            st.markdown("""
+            ### 💡 Interactivo
+            - Click para ver detalle
+            - Pop-up con información
+            - KPIs bursátiles
+            - Análisis técnico
+            """)
+
+# MOSTRAR PORTAFOLIO SI YA ESTÁ GENERADO
+else:
+    # Botón para generar nuevo portafolio
+    if st.button("🔄 Generar Nuevo Portafolio", type="secondary"):
+        # Resetear todo
+        st.session_state.portfolio_generated = False
+        st.session_state.selected_stock_ticker = None
+        st.session_state.portfolio_details = None
+        st.session_state.batch_data = None
+        st.session_state.portafolio = None
+        st.session_state.justificacion = None
+        st.rerun()
     
-    if not objetivos or not bolsas_preferidas:
-        st.error("❌ Completa todos los campos")
-        st.stop()
-    
-    # Limpiar selección previa
-    st.session_state.selected_stock_ticker = None
-    
-    with st.spinner("🧠 Generando portafolio..."):
-        portafolio, justificacion = generate_portfolio_with_gemini(perfil, horizonte, capital, objetivos, sector_pref, bolsas_preferidas)
-    
-    if not portafolio:
-        st.error("❌ Error generando portafolio")
-        st.stop()
-    
-    st.markdown(f'<div class="success-badge">✅ {len(portafolio)} posiciones generadas</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="success-badge">✅ {len(st.session_state.portafolio)} posiciones generadas</div>', unsafe_allow_html=True)
     st.markdown("---")
     
-    # Obtener detalles de todas las acciones
-    with st.spinner("📥 Obteniendo detalles de las empresas..."):
-        portfolio_details = []
-        for item in portafolio:
-            details = get_company_details(item['ticker'])
-            portfolio_details.append({**item, **details})
-        st.session_state.portfolio_details = portfolio_details
-        time.sleep(1)
-    
-    # Obtener datos históricos
-    tickers = [p['ticker'] for p in portafolio]
-    with st.spinner("📈 Descargando datos históricos..."):
-        batch_data = get_batch_stock_data(tickers, "1y")
-        st.session_state.batch_data = batch_data
-        time.sleep(1)
-    
-    # GRÁFICO DE PASTEL CON HOVER MEJORADO
+    # GRÁFICO DE PASTEL
     st.header("📊 Portafolio Sugerido por IA")
-    st.markdown(f'<div class="info-card"><strong>💡 Estrategia:</strong> {justificacion}</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="info-card"><strong>💡 Estrategia:</strong> {st.session_state.justificacion}</div>', unsafe_allow_html=True)
     
     st.markdown('<div class="click-instruction">👇 Selecciona una acción para ver su análisis detallado</div>', unsafe_allow_html=True)
     
-    # Crear hover text compacto y rectangular
+    # Pie chart
     labels_list = []
     values_list = []
     hover_text_list = []
     
-    for item in portfolio_details:
+    for item in st.session_state.portfolio_details:
         labels_list.append(f"{item['ticker']}<br>{item['peso']:.1f}%")
         values_list.append(item['peso'])
         
         empleados_str = f"{item['empleados']:,}" if item['empleados'] > 0 else "N/D"
-        # Hover compacto y rectangular
         hover_info = (
             f"<b>{item['nombre']}</b><br>"
             f"Sector: {item['sector']}<br>"
@@ -888,7 +934,7 @@ if generate_btn:
         hovertext=hover_text_list,
         hoverinfo='text',
         hole=0.45,
-        marker=dict(colors=colors[:len(portfolio_details)], line=dict(color='white', width=4)),
+        marker=dict(colors=colors[:len(st.session_state.portfolio_details)], line=dict(color='white', width=4)),
         textposition='inside',
         textfont=dict(size=15, color='white', family='Inter', weight='bold')
     ))
@@ -908,7 +954,7 @@ if generate_btn:
             yanchor="middle",
             y=0.5,
             xanchor="left",
-            x=1.15,  # Posicionar leyenda más a la derecha
+            x=1.15,
             font=dict(size=12, family='Inter'),
             bgcolor="rgba(255,255,255,0.95)",
             bordercolor="#667eea",
@@ -919,100 +965,61 @@ if generate_btn:
             font_size=12,
             font_family="Inter",
             bordercolor="#667eea",
-            align="left",
-            namelength=-1
+            align="left"
         ),
-        margin=dict(l=20, r=350, t=80, b=20)  # Más margen derecho para hover y leyenda
+        margin=dict(l=20, r=350, t=80, b=20)
     )
     
     st.plotly_chart(fig_pie, use_container_width=True)
     
     # BOTONES PARA SELECCIONAR ACCIÓN
-    st.subheader("🔍 Selecciona una acción para ver análisis detallado:")
+    st.subheader("🔍 Selecciona una acción:")
     
-    # Crear filas de botones (5 por fila)
     num_cols = 5
-    for i in range(0, len(portfolio_details), num_cols):
+    for i in range(0, len(st.session_state.portfolio_details), num_cols):
         cols = st.columns(num_cols)
         for j, col in enumerate(cols):
-            if i + j < len(portfolio_details):
-                item = portfolio_details[i + j]
+            if i + j < len(st.session_state.portfolio_details):
+                item = st.session_state.portfolio_details[i + j]
                 with col:
                     if st.button(
                         f"📊 {item['ticker']}\n{item['peso']:.1f}%",
-                        key=f"select_btn_{item['ticker']}",
+                        key=f"select_{item['ticker']}",
                         use_container_width=True,
                         type="primary" if st.session_state.selected_stock_ticker == item['ticker'] else "secondary"
                     ):
                         st.session_state.selected_stock_ticker = item['ticker']
                         st.rerun()
     
-    # MOSTRAR POP-UP DE DETALLE SI HAY SELECCIÓN
+    # MOSTRAR DETALLE SI HAY SELECCIÓN
     if st.session_state.selected_stock_ticker:
         st.markdown("---")
         st.markdown("---")
         
         selected_ticker = st.session_state.selected_stock_ticker
-        selected_details = next((item for item in portfolio_details if item['ticker'] == selected_ticker), None)
+        selected_details = next((item for item in st.session_state.portfolio_details if item['ticker'] == selected_ticker), None)
         
         if selected_details:
-            render_stock_detail_popup(selected_ticker, selected_details, batch_data)
+            render_stock_detail_popup(selected_ticker, selected_details, st.session_state.batch_data)
     
-    # CONTINUAR CON ANÁLISIS DEL PORTAFOLIO
+    # ANÁLISIS DEL PORTAFOLIO
     st.markdown("---")
     st.markdown("---")
     
-    successful_tickers = [t for t in tickers if t in batch_data and batch_data[t]['success']]
-    failed_tickers = [t for t in tickers if t not in successful_tickers]
-    
-    if failed_tickers:
-        st.markdown(f'<div class="warning-card">⚠️ No se obtuvieron datos de: {", ".join(failed_tickers)}</div>', unsafe_allow_html=True)
-    
-    if not successful_tickers:
-        st.error("❌ No se pudieron obtener datos de ningún activo")
-        st.stop()
-    
-    weights = {p['ticker']: p['peso'] / 100 for p in portafolio}
-    total_successful_weight = sum([weights[t] for t in successful_tickers])
-    adjusted_weights = {t: weights[t] / total_successful_weight for t in successful_tickers}
-    
-    st.markdown(f'<div class="success-badge">✅ Datos obtenidos para {len(successful_tickers)} activos</div>', unsafe_allow_html=True)
-    
-    # ANÁLISIS INDIVIDUAL
     st.header("📊 Análisis Individual de Activos")
     
-    individual_data = []
-    for ticker in successful_tickers:
-        hist = batch_data[ticker]['history']
-        metrics = calculate_metrics(hist)
-        
-        rend_icon = "🟢" if metrics.get('rendimiento_total', 0) > 0 else "🔴"
-        sharpe_icon = "⭐" if metrics.get('sharpe_ratio', 0) > 1 else "⚠️" if metrics.get('sharpe_ratio', 0) > 0 else "❌"
-        
-        individual_data.append({
-            'Ticker': ticker,
-            'Peso': f"{adjusted_weights[ticker]*100:.1f}%",
-            'Precio': f"${batch_data[ticker]['current_price']:.2f}",
-            'Rendimiento': f"{rend_icon} {metrics.get('rendimiento_total', 0):.2f}%",
-            'Volatilidad': f"{metrics.get('volatilidad_anual', 0):.1f}%",
-            'Sharpe': f"{sharpe_icon} {metrics.get('sharpe_ratio', 0):.2f}",
-            'Max DD': f"{metrics.get('max_drawdown', 0):.1f}%"
-        })
-    
-    individual_df = pd.DataFrame(individual_data)
-    
     st.markdown('<div class="enhanced-table">', unsafe_allow_html=True)
-    st.dataframe(individual_df, use_container_width=True, hide_index=True, height=400)
+    st.dataframe(st.session_state.individual_df, use_container_width=True, hide_index=True, height=400)
     st.markdown('</div>', unsafe_allow_html=True)
     
-    csv = individual_df.to_csv(index=False).encode('utf-8')
+    csv = st.session_state.individual_df.to_csv(index=False).encode('utf-8')
     st.download_button("📥 Descargar CSV", csv, f"portafolio_{datetime.now().strftime('%Y%m%d')}.csv", "text/csv")
     
-    # MÉTRICAS DEL PORTAFOLIO
+    # MÉTRICAS
     st.markdown("---")
     st.header("📈 Métricas del Portafolio Ponderado")
     
-    portfolio_metrics = calculate_portfolio_metrics(batch_data, adjusted_weights)
+    portfolio_metrics = st.session_state.portfolio_metrics
     
     if portfolio_metrics:
         col1, col2, col3, col4, col5 = st.columns(5)
@@ -1069,7 +1076,7 @@ if generate_btn:
             </div>
             """, unsafe_allow_html=True)
         
-        # GRÁFICO DE DESEMPEÑO
+        # GRÁFICO
         st.markdown("---")
         st.header("📊 Visualización del Portafolio")
         
@@ -1084,8 +1091,7 @@ if generate_btn:
                 y=(cumulative - 1) * 100,
                 line=dict(color='#667eea', width=4),
                 fill='tonexty',
-                fillcolor='rgba(102, 126, 234, 0.2)',
-                name='Portafolio'
+                fillcolor='rgba(102, 126, 234, 0.2)'
             ))
             
             fig_perf.add_hline(y=0, line_dash="dot", line_color="gray", line_width=2)
@@ -1094,58 +1100,30 @@ if generate_btn:
                 title='Rendimiento Acumulado del Portafolio',
                 yaxis_title='Rendimiento (%)',
                 height=500,
-                template='plotly_white',
-                font=dict(family='Inter')
+                template='plotly_white'
             )
             
             st.plotly_chart(fig_perf, use_container_width=True)
         
-        # ANÁLISIS IA FINAL
+        # ANÁLISIS IA
         st.markdown("---")
         st.markdown("""
         <div class="ai-section">
             <h2>🤖 Análisis Final con IA</h2>
-            <p>Evaluación concisa del portafolio generado (máx. 300 palabras)</p>
+            <p>Evaluación profesional del portafolio generado</p>
         </div>
         """, unsafe_allow_html=True)
         
-        with st.spinner("🧠 Gemini analizando el portafolio..."):
-            final_analysis = analyze_portfolio_with_gemini(individual_df, portfolio_metrics, perfil, justificacion)
+        with st.spinner("🧠 Analizando..."):
+            final_analysis = analyze_portfolio_with_gemini(
+                st.session_state.individual_df,
+                portfolio_metrics,
+                "Perfil seleccionado",  # Podrías guardar esto también en session_state
+                st.session_state.justificacion
+            )
             st.markdown(final_analysis)
         
-        st.success("✅ Análisis completo generado exitosamente")
-
-else:
-    st.info("👆 Completa el cuestionario y presiona el botón para generar tu portafolio personalizado")
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        st.markdown("""
-        ### 🤖 IA Personalizada
-        - Gemini 2.5 Flash
-        - Portafolio óptimo
-        - 5-10 posiciones
-        - Multi-bolsa
-        """)
-    
-    with col2:
-        st.markdown("""
-        ### 📊 Análisis Completo
-        - Métricas avanzadas
-        - Visualizaciones
-        - Dashboard por acción
-        - KPIs detallados
-        """)
-    
-    with col3:
-        st.markdown("""
-        ### 💡 Interactivo
-        - Click para ver detalle
-        - Pop-up con información
-        - KPIs bursátiles
-        - Análisis técnico
-        """)
+        st.success("✅ Análisis completo")
 
 st.markdown("---")
-st.caption("🤖 Powered by Gemini 2.5 Flash | Datos de Yahoo Finance | © 2025")
+st.caption("🤖 Powered by Gemini 2.5 Flash | © 2025")
