@@ -358,7 +358,19 @@ def get_company_details(ticker: str) -> Dict:
             'pe_ratio': 0,
             'beta': 0,
             'country': 'N/D',
-            'city': 'N/D'
+            'city': 'N/D',
+            'forward_pe': 0,
+            'peg_ratio': 0,
+            'price_to_book': 0,
+            'dividend_yield': 0,
+            'profit_margin': 0,
+            'operating_margin': 0,
+            'roe': 0,
+            'roa': 0,
+            'revenue_growth': 0,
+            'earnings_growth': 0,
+            'debt_to_equity': 0,
+            'website': ''
         }
 
 @st.cache_data(ttl=3600)
@@ -540,7 +552,7 @@ def analyze_portfolio_with_gemini(portfolio_data: pd.DataFrame, metrics: Dict, p
         return f"Error: {str(e)}"
 
 # =========================
-# FUNCIÓN PARA RENDERIZAR DETALLE DE ACCIÓN
+# FUNCIÓN PARA RENDERIZAR DETALLE DE ACCIÓN (CORREGIDA)
 # =========================
 
 def render_stock_detail_popup(ticker: str, details: Dict, batch_data: Dict):
@@ -569,23 +581,24 @@ def render_stock_detail_popup(ticker: str, details: Dict, batch_data: Dict):
         st.markdown(f"""
         <div class="kpi-card">
             <h4>📍 Ubicación</h4>
-            <div class="value" style="font-size: 1.5rem">{details['city']}</div>
-            <div class="description">{details['country']}</div>
+            <div class="value" style="font-size: 1.5rem">{details.get('city', 'N/D')}</div>
+            <div class="description">{details.get('country', 'N/D')}</div>
         </div>
         """, unsafe_allow_html=True)
     
     with col2:
-        empleados = f"{details['empleados']:,}" if details['empleados'] > 0 else "N/D"
+        empleados = details.get('empleados', 0)
+        empleados_str = f"{empleados:,}" if empleados > 0 else "N/D"
         st.markdown(f"""
         <div class="kpi-card">
             <h4>👥 Empleados</h4>
-            <div class="value" style="font-size: 1.5rem">{empleados}</div>
+            <div class="value" style="font-size: 1.5rem">{empleados_str}</div>
             <div class="description">Fuerza laboral</div>
         </div>
         """, unsafe_allow_html=True)
     
     with col3:
-        market_cap = details['market_cap']
+        market_cap = details.get('market_cap', 0)
         if market_cap > 1e12:
             cap_str = f"${market_cap/1e12:.2f}T"
         elif market_cap > 1e9:
@@ -622,11 +635,13 @@ def render_stock_detail_popup(ticker: str, details: Dict, batch_data: Dict):
     """, unsafe_allow_html=True)
     
     # Descripción
-    if details['descripcion'] and details['descripcion'] != 'N/D':
+    descripcion = details.get('descripcion', '')
+    if descripcion and descripcion != 'N/D' and descripcion != 'No disponible':
         with st.expander("📄 Sobre la empresa", expanded=False):
-            st.write(details['descripcion'])
-            if details.get('website'):
-                st.markdown(f"🌐 **Website:** [{details['website']}]({details['website']})")
+            st.write(descripcion)
+            website = details.get('website', '')
+            if website:
+                st.markdown(f"🌐 **Website:** [{website}]({website})")
     
     st.markdown("---")
     
@@ -636,70 +651,92 @@ def render_stock_detail_popup(ticker: str, details: Dict, batch_data: Dict):
     with tab1:
         col1, col2, col3, col4 = st.columns(4)
         
+        # P/E Ratio
         with col1:
             pe = details.get('pe_ratio', 0)
-            pe_color = "#4CAF50" if 0 < pe < 20 else "#FF9800" if 0 < pe < 30 else "#f44336" if pe > 0 else "#999"
+            pe_str = f"{pe:.2f}" if pe and pe > 0 else "N/D"
+            pe_color = "#4CAF50" if pe and 0 < pe < 20 else "#FF9800" if pe and 0 < pe < 30 else "#f44336" if pe and pe > 0 else "#999"
             st.markdown(f"""
             <div class="metric-box">
                 <div class="metric-label">P/E Ratio</div>
-                <div class="metric-value" style="color: {pe_color}">{pe:.2f if pe else 'N/D'}</div>
+                <div class="metric-value" style="color: {pe_color}">{pe_str}</div>
             </div>
             """, unsafe_allow_html=True)
         
+        # P/B Ratio
         with col2:
             pb = details.get('price_to_book', 0)
+            pb_str = f"{pb:.2f}" if pb and pb > 0 else "N/D"
             st.markdown(f"""
             <div class="metric-box">
                 <div class="metric-label">P/B Ratio</div>
-                <div class="metric-value">{pb:.2f if pb else 'N/D'}</div>
+                <div class="metric-value">{pb_str}</div>
             </div>
             """, unsafe_allow_html=True)
         
+        # Dividend Yield
         with col3:
-            div_yield = details.get('dividend_yield', 0) * 100 if details.get('dividend_yield') else 0
+            div_yield = details.get('dividend_yield', 0)
+            div_yield_pct = div_yield * 100 if div_yield else 0
+            div_str = f"{div_yield_pct:.2f}%" if div_yield_pct > 0 else "0.00%"
             st.markdown(f"""
             <div class="metric-box">
                 <div class="metric-label">Dividend Yield</div>
-                <div class="metric-value" style="color: #4CAF50">{div_yield:.2f}%</div>
+                <div class="metric-value" style="color: #4CAF50">{div_str}</div>
             </div>
             """, unsafe_allow_html=True)
         
+        # Beta
         with col4:
             beta = details.get('beta', 0)
+            beta_str = f"{beta:.2f}" if beta and beta != 0 else "N/D"
+            beta_color = "#4CAF50" if beta and beta < 1 else "#FF9800" if beta and beta < 1.5 else "#f44336" if beta else "#999"
             st.markdown(f"""
             <div class="metric-box">
                 <div class="metric-label">Beta</div>
-                <div class="metric-value">{beta:.2f if beta else 'N/D'}</div>
+                <div class="metric-value" style="color: {beta_color}">{beta_str}</div>
             </div>
             """, unsafe_allow_html=True)
     
     with tab2:
         col1, col2, col3 = st.columns(3)
         
+        # Margen de Utilidad
         with col1:
-            profit_margin = details.get('profit_margin', 0) * 100 if details.get('profit_margin') else 0
+            profit_margin = details.get('profit_margin', 0)
+            pm_pct = profit_margin * 100 if profit_margin else 0
+            pm_str = f"{pm_pct:.1f}%" if pm_pct != 0 else "N/D"
+            pm_color = "#4CAF50" if pm_pct > 20 else "#FF9800" if pm_pct > 10 else "#999"
             st.markdown(f"""
             <div class="metric-box">
                 <div class="metric-label">Margen Utilidad</div>
-                <div class="metric-value" style="color: {'#4CAF50' if profit_margin > 20 else '#FF9800'}">{profit_margin:.1f}%</div>
+                <div class="metric-value" style="color: {pm_color}">{pm_str}</div>
             </div>
             """, unsafe_allow_html=True)
         
+        # ROE
         with col2:
-            roe = details.get('roe', 0) * 100 if details.get('roe') else 0
+            roe = details.get('roe', 0)
+            roe_pct = roe * 100 if roe else 0
+            roe_str = f"{roe_pct:.1f}%" if roe_pct != 0 else "N/D"
+            roe_color = "#4CAF50" if roe_pct > 15 else "#FF9800" if roe_pct > 10 else "#999"
             st.markdown(f"""
             <div class="metric-box">
                 <div class="metric-label">ROE</div>
-                <div class="metric-value" style="color: {'#4CAF50' if roe > 15 else '#FF9800'}">{roe:.1f}%</div>
+                <div class="metric-value" style="color: {roe_color}">{roe_str}</div>
             </div>
             """, unsafe_allow_html=True)
         
+        # Crecimiento
         with col3:
-            rev_growth = details.get('revenue_growth', 0) * 100 if details.get('revenue_growth') else 0
+            rev_growth = details.get('revenue_growth', 0)
+            rg_pct = rev_growth * 100 if rev_growth else 0
+            rg_str = f"{rg_pct:+.1f}%" if rg_pct != 0 else "N/D"
+            rg_color = "#4CAF50" if rg_pct > 0 else "#f44336" if rg_pct < 0 else "#999"
             st.markdown(f"""
             <div class="metric-box">
                 <div class="metric-label">Crecimiento</div>
-                <div class="metric-value" style="color: {'#4CAF50' if rev_growth > 0 else '#f44336'}">{rev_growth:+.1f}%</div>
+                <div class="metric-value" style="color: {rg_color}">{rg_str}</div>
             </div>
             """, unsafe_allow_html=True)
     
@@ -747,6 +784,8 @@ def render_stock_detail_popup(ticker: str, details: Dict, batch_data: Dict):
                 st.metric("Sharpe", f"{metrics.get('sharpe_ratio', 0):.2f}")
             with col4:
                 st.metric("Max DD", f"{metrics.get('max_drawdown', 0):.1f}%")
+        else:
+            st.warning("⚠️ No hay datos históricos disponibles para esta acción")
 
 # =========================
 # INTERFAZ PRINCIPAL
@@ -759,7 +798,7 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# CUESTIONARIO (siempre visible si no hay portafolio generado)
+# CUESTIONARIO
 if not st.session_state.portfolio_generated:
     st.markdown('<div class="questionnaire-card">', unsafe_allow_html=True)
     st.header("📋 Cuestionario de Perfil de Inversión")
@@ -914,7 +953,8 @@ else:
         labels_list.append(f"{item['ticker']}<br>{item['peso']:.1f}%")
         values_list.append(item['peso'])
         
-        empleados_str = f"{item['empleados']:,}" if item['empleados'] > 0 else "N/D"
+        empleados = item.get('empleados', 0)
+        empleados_str = f"{empleados:,}" if empleados > 0 else "N/D"
         hover_info = (
             f"<b>{item['nombre']}</b><br>"
             f"Sector: {item['sector']}<br>"
@@ -1118,7 +1158,7 @@ else:
             final_analysis = analyze_portfolio_with_gemini(
                 st.session_state.individual_df,
                 portfolio_metrics,
-                "Perfil seleccionado",  # Podrías guardar esto también en session_state
+                "Perfil seleccionado",
                 st.session_state.justificacion
             )
             st.markdown(final_analysis)
