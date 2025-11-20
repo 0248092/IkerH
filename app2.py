@@ -1,6 +1,6 @@
 from __future__ import annotations
 import warnings
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Dict, List
 import numpy as np
 import pandas as pd
@@ -9,8 +9,8 @@ from bs4 import BeautifulSoup
 import yfinance as yf
 import streamlit as st
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 import google.generativeai as genai
+import os
 
 warnings.filterwarnings("ignore")
 
@@ -23,10 +23,26 @@ st.set_page_config(
     page_icon="📊"
 )
 
-# Configurar Gemini
-API_KEY = st.env["API_KEY"]
-genai.configure(api_key=API_KEY)
-model = genai.GenerativeModel("gemini-2.0-flash-exp")
+# Configurar Gemini (compatible con local y cloud)
+try:
+    # Intentar cargar desde .env (desarrollo local)
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+        GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+    except:
+        # Si falla, usar secrets de Streamlit (cloud)
+        GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
+    
+    if not GEMINI_API_KEY:
+        st.error("❌ No se encontró GEMINI_API_KEY")
+        st.stop()
+    
+    genai.configure(api_key=GEMINI_API_KEY)
+    model = genai.GenerativeModel("gemini-2.0-flash-exp")
+except Exception as e:
+    st.error(f"Error configurando Gemini: {str(e)}")
+    st.stop()
 
 # =========================
 # ESTILOS CSS
@@ -71,12 +87,11 @@ st.markdown("""
 
 @st.cache_data(ttl=3600)
 def scrape_yfinance_data(ticker: str) -> Dict:
-    """Obtiene datos de Yahoo Finance usando web scraping"""
+    """Obtiene datos de Yahoo Finance"""
     try:
         stock = yf.Ticker(ticker)
         info = stock.info
         
-        # Datos básicos
         data = {
             'nombre': info.get('longName', ticker),
             'sector': info.get('sector', 'N/D'),
@@ -107,8 +122,6 @@ def scrape_finviz_data(ticker: str) -> Dict:
             return {}
         
         soup = BeautifulSoup(response.text, 'html.parser')
-        
-        # Extraer tabla de datos
         table = soup.find('table', {'class': 'snapshot-table2'})
         data = {}
         
@@ -239,7 +252,6 @@ def analyze_with_gemini(portfolio_data: pd.DataFrame, profile: str) -> str:
 # INTERFAZ PRINCIPAL
 # =========================
 
-# Header
 st.markdown("""
 <div class="main-header">
     <h1>📊 Análisis Comparativo de Portafolio</h1>
@@ -251,7 +263,6 @@ st.markdown("""
 with st.sidebar:
     st.header("⚙️ Configuración")
     
-    # Input de tickers
     st.subheader("Selección de Acciones")
     ticker_input = st.text_area(
         "Ingresa los tickers (uno por línea)",
@@ -260,14 +271,11 @@ with st.sidebar:
         help="Ingresa un ticker por línea. Ejemplo: AAPL, MSFT, GOOGL"
     )
     
-    # Convertir input a lista
     tickers = [t.strip().upper() for t in ticker_input.split('\n') if t.strip()]
-    
     st.metric("Acciones Seleccionadas", len(tickers))
     
     st.markdown("---")
     
-    # Perfil de inversión
     st.subheader("🎯 Perfil de Inversión")
     perfil = st.selectbox(
         "Selecciona tu perfil",
@@ -282,7 +290,6 @@ with st.sidebar:
     
     st.markdown("---")
     
-    # Período de análisis
     st.subheader("📅 Período")
     periodo = st.selectbox(
         "Período histórico",
@@ -292,12 +299,7 @@ with st.sidebar:
     
     st.markdown("---")
     
-    # Botón de análisis
     analyze_btn = st.button("🚀 ANALIZAR PORTAFOLIO", type="primary", use_container_width=True)
-
-# =========================
-# ANÁLISIS PRINCIPAL
-# =========================
 
 if analyze_btn:
     if not tickers:
@@ -306,14 +308,12 @@ if analyze_btn:
     
     with st.spinner("🔄 Analizando portafolio..."):
         
-        # Comparación de acciones
         st.header("📊 Comparación de Acciones")
         comparison_df = compare_stocks(tickers)
         
         if not comparison_df.empty:
             st.dataframe(comparison_df, use_container_width=True, hide_index=True)
             
-            # Descargar datos
             csv = comparison_df.to_csv(index=False).encode('utf-8')
             st.download_button(
                 "📥 Descargar Comparación (CSV)",
@@ -324,19 +324,16 @@ if analyze_btn:
         
         st.markdown("---")
         
-        # Gráficos comparativos
         st.header("📈 Desempeño Histórico")
         
         col1, col2 = st.columns(2)
         
         with col1:
-            # Gráfico de precios normalizados
             fig_prices = go.Figure()
             
             for ticker in tickers:
                 hist = get_historical_prices(ticker, periodo)
                 if not hist.empty:
-                    # Normalizar a base 100
                     normalized = (hist['Close'] / hist['Close'].iloc[0]) * 100
                     fig_prices.add_trace(go.Scatter(
                         x=hist.index,
@@ -355,7 +352,6 @@ if analyze_btn:
             st.plotly_chart(fig_prices, use_container_width=True)
         
         with col2:
-            # Gráfico de volatilidad
             volatilidades = []
             for ticker in tickers:
                 hist = get_historical_prices(ticker, periodo)
@@ -387,7 +383,6 @@ if analyze_btn:
         
         st.markdown("---")
         
-        # Análisis detallado por acción
         st.header("🔍 Análisis Detallado por Acción")
         
         tabs = st.tabs(tickers)
@@ -416,10 +411,10 @@ if analyze_btn:
                     
                     if finviz_data:
                         st.subheader("Datos Finviz")
-                        st.json(finviz_data)
+                        with st.expander("Ver datos completos"):
+                            st.json(finviz_data)
                 
                 with col_b:
-                    # Gráfico de velas
                     hist = get_historical_prices(ticker, periodo)
                     if not hist.empty:
                         fig_candle = go.Figure(data=[go.Candlestick(
@@ -439,7 +434,6 @@ if analyze_btn:
                         )
                         st.plotly_chart(fig_candle, use_container_width=True)
                         
-                        # Métricas
                         metrics = calculate_metrics(hist)
                         m1, m2, m3, m4 = st.columns(4)
                         m1.metric("Rendimiento Total", f"{metrics.get('rendimiento_total', 0):.2f}%")
@@ -449,7 +443,6 @@ if analyze_btn:
         
         st.markdown("---")
         
-        # Análisis con IA
         st.markdown("""
         <div class="ai-section">
             <h2>🤖 Análisis con Inteligencia Artificial</h2>
@@ -464,7 +457,6 @@ if analyze_btn:
         st.success("✅ Análisis completado")
 
 else:
-    # Pantalla de inicio
     st.info("👈 Configura tu portafolio en la barra lateral y presiona **ANALIZAR PORTAFOLIO**")
     
     col1, col2, col3 = st.columns(3)
@@ -493,6 +485,5 @@ else:
         - Estrategias de inversión
         """)
 
-# Footer
 st.markdown("---")
 st.caption("📊 Análisis de Portafolio | Datos de Yahoo Finance & Finviz | Powered by Gemini AI")
